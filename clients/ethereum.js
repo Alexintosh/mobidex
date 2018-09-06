@@ -1,4 +1,5 @@
-import { ZeroEx } from '0x.js';
+import { Web3Wrapper } from '@0xproject/web3-wrapper';
+import { BigNumber } from '0x.js';
 import { cache, time } from '../decorators/cls';
 
 export default class EthereumClient {
@@ -15,7 +16,7 @@ export default class EthereumClient {
   }
 
   @time
-  @cache('ethereum:balance', 10)
+  @cache('ethereum:balance', 60)
   async getBalance() {
     let account = await this.getAccount();
     return await new Promise((resolve, reject) => {
@@ -25,7 +26,7 @@ export default class EthereumClient {
           if (err) {
             reject(err);
           } else {
-            resolve(balance);
+            resolve(new BigNumber(balance));
           }
         }
       );
@@ -98,7 +99,10 @@ export default class EthereumClient {
   @time
   async send(to, amount) {
     let sender = await this.ethereumClient.getAccount();
-    let value = ZeroEx.toBaseUnitAmount(new BigNumber(amount), 18).toString();
+    let value = Web3Wrapper.toBaseUnitAmount(
+      new BigNumber(amount),
+      18
+    ).toString();
     return await new Promise((resolve, reject) => {
       this.web3.eth.sendTransaction({ from: sender, to, value }, function(
         err,

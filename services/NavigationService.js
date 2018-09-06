@@ -28,7 +28,7 @@ export function goBack() {
 }
 
 export function error(error) {
-  console.warn(error);
+  console.warn(error.sourceURL);
   _store.dispatch(setError(error));
   navigate('Error', { error });
 }

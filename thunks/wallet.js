@@ -1,45 +1,67 @@
-import { ZeroEx } from '0x.js';
-import BigNumber from 'bignumber.js';
-import { addActiveTransactions, addAssets, addTransactions } from '../actions';
+import { Web3Wrapper } from '@0xproject/web3-wrapper';
+import { BigNumber } from '0x.js';
+import * as _ from 'lodash';
+import {
+  addActiveTransactions,
+  addTransactions,
+  setAllowances,
+  setBalances
+} from '../actions';
 import EthereumClient from '../clients/ethereum';
 import TokenClient from '../clients/token';
+import * as AssetService from '../services/AssetService';
 import NavigationService from '../services/NavigationService';
 import { TransactionService } from '../services/TransactionService';
-import * as TokenService from '../services/TokenService';
 import * as ZeroExService from '../services/ZeroExService';
 import { cache } from '../utils';
 
-export function loadAssets(force = false) {
+export function loadAllowances(force = false) {
   return async (dispatch, getState) => {
     const {
       wallet: { web3 },
-      relayer: { tokens }
+      relayer: { assets }
+    } = getState();
+    const ethereumClient = new EthereumClient(web3);
+    const allowances = await Promise.all(
+      assets.filter(({ address }) => Boolean(address)).map(({ address }) => {
+        const tokenClient = new TokenClient(ethereumClient, address);
+        return tokenClient
+          .getAllowance(force)
+          .then(allowance => ({ [address]: allowance }));
+      })
+    );
+    const allAllowances = allowances.reduce(
+      (acc, obj) => _.merge(acc, obj),
+      {}
+    );
+
+    dispatch(setAllowances(allAllowances));
+  };
+}
+
+export function loadBalances(force = false) {
+  return async (dispatch, getState) => {
+    const {
+      wallet: { web3 },
+      relayer: { assets }
     } = getState();
     const ethereumClient = new EthereumClient(web3);
     const balances = await Promise.all(
-      tokens.map(({ address }) => {
-        const tokenClient = new TokenClient(ethereumClient, address, force);
-        const balance = tokenClient.getBalance();
-        return balance;
+      assets.filter(({ address }) => Boolean(address)).map(({ address }) => {
+        const tokenClient = new TokenClient(ethereumClient, address);
+        return tokenClient
+          .getBalance(force)
+          .then(balance => ({ [address]: balance }));
       })
     );
-    const extendedTokens = tokens.map((token, index) => ({
-      ...token,
-      balance: balances[index]
-    }));
-    extendedTokens.push({
-      address: null,
-      symbol: 'ETH',
-      name: 'Ether',
-      decimals: 18,
-      balance: await new EthereumClient(web3).getBalance()
-    });
-    const assets = extendedTokens.map(({ balance, ...token }) => ({
-      ...token,
-      balance: new BigNumber(balance)
-    }));
+    const allBalances = balances.reduce((acc, obj) => _.merge(acc, obj), {});
 
-    dispatch(addAssets(assets));
+    dispatch(setBalances(allBalances));
+    dispatch(
+      setBalances({
+        null: await ethereumClient.getBalance(force)
+      })
+    );
   };
 }
 
@@ -61,27 +83,27 @@ export function loadTransactions(force = false) {
           };
           let promises = [
             fetch(
-              `https://mobidex.io/inf0x/${network}/fills?maker=${address}`,
+              `https://mobidex.io:8443/inf0x/${network}/fills?maker=${address}`,
               options
             ),
             fetch(
-              `https://mobidex.io/inf0x/${network}/fills?taker=${address}`,
+              `https://mobidex.io:8443/inf0x/${network}/fills?taker=${address}`,
               options
             ),
             fetch(
-              `https://mobidex.io/inf0x/${network}/cancels?maker=${address}`,
+              `https://mobidex.io:8443/inf0x/${network}/cancels?maker=${address}`,
               options
             ),
             fetch(
-              `https://mobidex.io/inf0x/${network}/deposits?sender=${address}`,
+              `https://mobidex.io:8443/inf0x/${network}/deposits?sender=${address}`,
               options
             ),
             fetch(
-              `https://mobidex.io/inf0x/${network}/withdrawals?sender=${address}`,
+              `https://mobidex.io:8443/inf0x/${network}/withdrawals?sender=${address}`,
               options
             ),
             fetch(
-              `https://mobidex.io/inf0x/${network}/approvals?owner=${address}`,
+              `https://mobidex.io:8443/inf0x/${network}/approvals?owner=${address}`,
               options
             )
           ];
@@ -165,7 +187,7 @@ export function sendTokens(token, to, amount) {
       } = getState();
       const ethereumClient = new EthereumClient(web3);
       const tokenClient = new TokenClient(ethereumClient, token.address);
-      const txhash = await tokenClient.send(web3, token, to, amount);
+      const txhash = await tokenClient.send(to, amount);
       const activeTransaction = {
         id: txhash,
         type: 'SEND_TOKENS',
@@ -205,10 +227,10 @@ export function sendEther(to, amount) {
 
 export function wrapEther(amount, options = { wei: false, batch: false }) {
   return async () => {
-    const { address, decimals } = await TokenService.getWETHToken();
+    const { address, decimals } = await AssetService.getWETHAsset();
     const value = options.wei
       ? new BigNumber(amount)
-      : ZeroEx.toBaseUnitAmount(new BigNumber(amount), decimals);
+      : Web3Wrapper.toBaseUnitAmount(new BigNumber(amount), decimals);
 
     await ZeroExService.deposit(address, value, options);
   };
@@ -220,7 +242,7 @@ export function checkAndWrapEther(
   options = { wei: false, batch: false }
 ) {
   return async () => {
-    const weth = await TokenService.getWETHToken();
+    const weth = await AssetService.getWETHAsset();
 
     if (address === weth.address) {
       await wrapEther(amount, options);
@@ -230,10 +252,10 @@ export function checkAndWrapEther(
 
 export function unwrapEther(amount, options = { wei: false, batch: false }) {
   return async () => {
-    const { address, decimals } = await TokenService.getWETHToken();
+    const { address, decimals } = await AssetService.getWETHAsset();
     const value = options.wei
       ? new BigNumber(amount)
-      : ZeroEx.toBaseUnitAmount(new BigNumber(amount), decimals);
+      : Web3Wrapper.toBaseUnitAmount(new BigNumber(amount), decimals);
 
     await ZeroExService.withdraw(address, value, options);
   };
@@ -245,7 +267,7 @@ export function checkAndUnwrapEther(
   options = { wei: false, batch: false }
 ) {
   return async () => {
-    const weth = await TokenService.getWETHToken();
+    const weth = await AssetService.getWETHAsset();
 
     if (address === weth.address) {
       await unwrapEther(amount, options);
@@ -264,10 +286,10 @@ export function checkAndSetTokenAllowance(
     } = getState();
     const ethereumClient = new EthereumClient(web3);
     const tokenClient = new TokenClient(ethereumClient, address);
-    const { decimals } = TokenService.findTokenByAddress(address);
+    const { decimals } = AssetService.findAssetByAddress(address);
     const amt = options.wei
       ? new BigNumber(amount)
-      : ZeroEx.toBaseUnitAmount(new BigNumber(amount), decimals);
+      : Web3Wrapper.toBaseUnitAmount(new BigNumber(amount), decimals);
 
     const allowance = await tokenClient.getAllowance();
     if (new BigNumber(amt).gt(allowance)) {

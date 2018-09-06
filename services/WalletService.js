@@ -18,8 +18,8 @@
 // // publish to network
 // if (opts.publishTransaction) self.publishTransaction = opts.publishTransaction
 
-import { ZeroEx } from '0x.js';
-import BigNumber from 'bignumber.js';
+import { Web3Wrapper } from '@0xproject/web3-wrapper';
+import { BigNumber } from '0x.js';
 import EthTx from 'ethereumjs-tx';
 import ethUtil from 'ethereumjs-util';
 import sigUtil from 'eth-sig-util';
@@ -27,6 +27,7 @@ import * as _ from 'lodash';
 import { NativeModules } from 'react-native';
 import ZeroClientProvider from 'web3-provider-engine/zero';
 import Web3 from 'web3';
+import ZeroExClient from '../clients/0x';
 import { setWallet } from '../actions';
 import { getURLFromNetwork } from '../utils';
 
@@ -168,38 +169,51 @@ export async function generateMnemonics() {
   });
 }
 
-export function getAssetByAddress(address) {
-  if (!address) return null;
-  const {
-    wallet: { assets }
-  } = _store.getState();
-  return _.find(assets, { address });
-}
-
-export function getAssetBySymbol(symbol) {
-  const {
-    wallet: { assets }
-  } = _store.getState();
-  return _.find(assets, { symbol });
-}
-
 export function getBalanceByAddress(address) {
-  if (!address) return getBalanceBySymbol('ETH');
-  const asset = getAssetByAddress(address);
-  if (!asset) return new BigNumber(0);
-  return ZeroEx.toUnitAmount(new BigNumber(asset.balance), asset.decimals);
+  const {
+    wallet: { balances },
+    relayer: { assets }
+  } = _store.getState();
+  if (!address) {
+    if (!balances[null]) {
+      ZeroExClient.ZERO;
+    } else {
+      return Web3Wrapper.toUnitAmount(new BigNumber(balances[null]), 18);
+    }
+  }
+
+  const asset = _.find(assets, { address });
+  if (!asset) return ZeroExClient.ZERO;
+  if (!balances[address]) return ZeroExClient.ZERO;
+  return Web3Wrapper.toUnitAmount(
+    new BigNumber(balances[address]),
+    asset.decimals
+  );
 }
 
 export function getBalanceBySymbol(symbol) {
-  const asset = getAssetBySymbol(symbol);
-  if (!asset) return new BigNumber(0);
-  return ZeroEx.toUnitAmount(new BigNumber(asset.balance), asset.decimals);
+  const {
+    wallet: { balances },
+    relayer: { assets }
+  } = _store.getState();
+  if (!symbol) return getBalanceByAddress();
+
+  const asset = _.find(assets, { symbol });
+  if (!asset) return ZeroExClient.ZERO;
+  if (!balances[asset.address]) return ZeroExClient.ZERO;
+  return Web3Wrapper.toUnitAmount(
+    new BigNumber(balances[asset.address]),
+    asset.decimals
+  );
 }
 
 export function getAdjustedBalanceByAddress(address) {
+  const {
+    relayer: { assets }
+  } = _store.getState();
   if (!address) return getFullEthereumBalance();
-  const asset = getAssetByAddress(address);
-  if (!asset) return new BigNumber(0);
+  const asset = _.find(assets, { address });
+  if (!asset) return ZeroExClient.ZERO;
   if (asset.symbol === 'ETH' || asset.symbol === 'WETH')
     return getFullEthereumBalance();
   return getBalanceByAddress(address);
@@ -215,13 +229,19 @@ export function getFullEthereumBalance() {
 }
 
 export function getDecimalsByAddress(address) {
-  const asset = getAssetByAddress(address);
+  const {
+    relayer: { assets }
+  } = _store.getState();
+  const asset = _.find(assets, { address });
   if (!asset) return 0;
   return asset.decimals;
 }
 
 export function getDecimalsBySymbol(symbol) {
-  const asset = getAssetBySymbol(symbol);
+  const {
+    relayer: { assets }
+  } = _store.getState();
+  const asset = _.find(assets, { symbol });
   if (!asset) return 0;
   return asset.decimals;
 }
